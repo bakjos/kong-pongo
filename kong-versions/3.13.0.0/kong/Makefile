@@ -3,7 +3,8 @@ MACHINE := $(shell uname -m)
 
 BAZEL_REMOTE_CACHE_OPT := $(if $(BAZEL_REMOTE_CACHE),--remote_cache=$(BAZEL_REMOTE_CACHE))
 LUAROCKS_OPTS ?= --server https://kong.github.io/kongrocks-dev/rocks/ OPENSSL_DIR=$(OPENSSL_DIR) YAML_DIR=$(YAML_DIR) AVRO_INCDIR=$(AVRO_INCDIR) AVRO_LIBDIR=$(AVRO_LIBDIR)
-DEV_ROCKS = "busted 2.2.0" "busted-hjtest 0.0.5" "luacheck 1.2.0" "lua-llthreads2 0.1.6" "ldoc 1.5.0" "luacov 0.16.0" "lua-reqwest 0.1.2"
+# lua-reqwest 0.1.1 installed separately with Cargo patch for native-tls (fixes Protocol::Tlsv13 build error)
+DEV_ROCKS = "busted 2.2.0" "busted-hjtest 0.0.5" "luacheck 1.2.0" "lua-llthreads2 0.1.6" "ldoc 1.5.0" "luacov 0.16.0"
 WIN_SCRIPTS = "bin/busted" "bin/kong" "bin/kong-health"
 BUSTED_ARGS ?= -v
 TEST_CMD ?= bin/busted $(BUSTED_ARGS)
@@ -256,7 +257,22 @@ remove:
 	$(warning 'remove' target is deprecated, please use `make dev` instead)
 	-@luarocks remove kong
 
-dependencies: install-rust-toolchain bin/grpcurl bin/h2client
+# Install lua-reqwest from source with Cargo patch so native-tls 0.2.14+ is used (fixes Protocol::Tlsv13)
+LUA_REQWEST_BUILD_DIR ?= /tmp/lua-reqwest-build
+install-lua-reqwest: install-rust-toolchain
+	@if luarocks list --porcelain lua-reqwest | grep -q "installed" ; then \
+	  echo "lua-reqwest already installed, skipping" ; \
+	else \
+	  echo "Installing lua-reqwest with native-tls patch..." ; \
+	  export PATH=$$PATH:$$HOME/.cargo/bin ; \
+	  rm -rf $(LUA_REQWEST_BUILD_DIR) && mkdir -p $(LUA_REQWEST_BUILD_DIR) && \
+	  git clone --depth 1 --branch 0.1.1 https://github.com/oowl/lua-reqwest.git $(LUA_REQWEST_BUILD_DIR) && \
+	  (echo "" ; echo "[patch.crates-io]" ; echo 'native-tls = { git = "https://github.com/rust-native-tls/rust-native-tls", tag = "v0.2.14" }') >> $(LUA_REQWEST_BUILD_DIR)/Cargo.toml && \
+	  cd $(LUA_REQWEST_BUILD_DIR) && luarocks make lua-reqwest-0.1.0-1.rockspec $(LUAROCKS_OPTS) && \
+	  rm -rf $(LUA_REQWEST_BUILD_DIR) ; \
+	fi
+
+dependencies: install-rust-toolchain bin/grpcurl bin/h2client install-lua-reqwest
 	$(warning 'dependencies' target is deprecated, this is now not needed when using `make dev`, but are kept for installation that are not built by Bazel)
 
 	export PATH=$$PATH:$$HOME/.cargo/bin; \
